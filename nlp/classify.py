@@ -2,15 +2,20 @@ import numpy as np
 from keras.preprocessing.text import Tokenizer
 from keras.preprocessing.sequence import pad_sequences
 from keras.utils import to_categorical
-from sklearn.cross_validation import StratifiedKFold
+from sklearn.model_selection import StratifiedKFold
 
-from preprocessing import preprocessData, writeNormalisedData
-from models import lstm_simple
+from nlp.preprocessing import preprocessData, writeNormalisedData
+from nlp.models import all_models
+
+import json, argparse, os
+import re
+import io
+import sys
 
 
 class classifier():
 
-    def __init__(lr=0.001,
+    def __init__(self, lr=0.001,
                  n_folds=5, # Change default values of following to none and provide default in application
                  trainDataPath="/home/singh/Desktop/emocontext/starterkitdata/train.txt",
                  testDataPath="/home/singh/Desktop/emocontext/starterkitdata/devwithoutlabels.txt",
@@ -24,7 +29,8 @@ class classifier():
                  lstm_dim=200,
                  dropout=0.2,
                  n_epochs=10,
-                 eval_kfold=True
+                 eval_kfold=True,
+                 model = None
                  ):
 
         self.lr = lr
@@ -42,14 +48,23 @@ class classifier():
         self.dropout = dropout
         self.n_epochs = n_epochs
         self.eval_kfold = eval_kfold
+        if model is not None:
+            self.model = model
+        else:
+            self.model = all_models(embedding_dim=self.embedding_dim, 
+                                    lstm_dim=self.lstm_dim, 
+                                    dropout=self.dropout,
+                                    n_class=self.n_class,
+                                    max_seq_length=self.max_seq_length,
+                                    lr=self.lr)
 
     def fit(self):
         self.__call__()
 
     def __call__(self):
-        self.evaluate_()
+        self.evaluate()
 
-    def evaluate():
+    def evaluate(self):
         # Load data from given file data
 
         print("Processing training data...")
@@ -67,10 +82,14 @@ class classifier():
         trainSequences = tokenizer.texts_to_sequences(trainTexts)
         testSequences = tokenizer.texts_to_sequences(testTexts)
 
+        wordIndex = tokenizer.word_index
+        print("Found %s unique tokens." % len(wordIndex))
+
         print("Populating embedding matrix...")
-        embeddingMatrix = getEmbeddingMatrix(wordIndex, self.gloveDir)
+        embeddingMatrix = getEmbeddingMatrix(wordIndex, self.gloveDir, self.embedding_dim)
 
         data = pad_sequences(trainSequences, maxlen=self.max_seq_length)
+        label1 = np.asarray(labels)
         labels = to_categorical(np.asarray(labels))
         print("Shape of training data tensor: ", data.shape)
         print("Shape of label tensor: ", labels.shape)
@@ -80,35 +99,57 @@ class classifier():
         np.random.shuffle(trainIndices)
         data = data[trainIndices]
         labels = labels[trainIndices]
+        label1 = label1[trainIndices]
 
         # Evaluate kfold
         if self.eval_kfold:
-            self.evaluate_kfold(data=data, labels=labels, embeddingMatrix=embeddingMatrix)
+            self.evaluate_kfold(data=data, labels=labels, label1 = label1, embeddingMatrix=embeddingMatrix)
 
         # Train on entire data
-        
+        model = self.train(X_train=data, y_train=labels,
+                           embeddingMatrix=embeddingMatrix)
 
-        # Write predictions
+        # Save and load model
+        model.save('EP%d_LR%de-5_LDim%d_BS%d.h5'%(NUM_EPOCHS, int(LEARNING_RATE*(10**5)), LSTM_DIM, BATCH_SIZE))
+        # model = load_model('EP%d_LR%de-5_LDim%d_BS%d.h5'%(NUM_EPOCHS, int(LEARNING_RATE*(10**5)), LSTM_DIM, BATCH_SIZE))
+
+        # Write predictions to file
+        print("Creating solution file...")
+        testData = pad_sequences(testSequences, maxlen=self.max_seq_length)
+        predictions = model.predict(testData, batch_size=self.batch_size)
+        predictions = predictions.argmax(axis=1)
+
+        with io.open(solutionPath, "w", encoding="utf8") as fout:
+            fout.write('\t'.join(["id", "turn1", "turn2", "turn3", "label"]) + '\n')        
+            with io.open(testDataPath, encoding="utf8") as fin:
+                fin.readline()
+                for lineNum, line in enumerate(fin):
+                    fout.write('\t'.join(line.strip().split('\t')[:4]) + '\t')
+                    fout.write(label2emotion[predictions[lineNum]] + '\n')
+        print("Completed. Model parameters: ")
+        print("Learning rate : %.3f, LSTM Dim : %d, Dropout : %.3f, Batch_size : %d" 
+            % (self.lr, self.lstm_dim, self.dropout, self.batch_size))
 
 
 
-    def evaluate_kfold(data=None, labels=None, embeddingMatrix=None):
+    def evaluate_kfold(self, data=None, labels=None, label1=None, embeddingMatrix=None):
         # Add training
         metrics = {"accuracy" : [],
                "microPrecision" : [],
                "microRecall" : [],
                "microF1" : []}
 
-        folds = StratifiedKFold(y, n_folds=self.n_folds, shuffle=True, random_state=None)
+        skf = StratifiedKFold(n_splits=self.n_folds, shuffle=True, random_state=30)
+        skf.get_n_splits(data, label1)
     
         print("Starting k-fold cross validation...")
         k=0
-        for train_index, test_index in folds:
+        for train_index, test_index in skf.split(data, label1):
             print('-'*40)
-            print("Fold %d/%d" % (k+1, NUM_FOLDS))
+            print("Fold %d/%d" % (k+1, self.n_folds))
             k=k+1
 
-            X_train, X_test = data[:, train_index], data[:, test_index]
+            X_train, X_test = data[train_index], data[test_index]
             y_train, y_test = labels[train_index], labels[test_index]
 
             print("Building model...")
@@ -133,18 +174,23 @@ class classifier():
 
         print("\n======================================")
 
-    def train(X_train=None, y_train=None, embeddingMatrix=None, X_test=None, y_test=None):
-        model = lstm_simple(embeddingMatrix)
-        model.fit(X_train, y_train, 
-                validation_data=(X_test, y_test),
-                epochs=self.n_epochs, batch_size=self.batch_size, verbose = 2)
+    def train(self, X_train=None, y_train=None, embeddingMatrix=None, X_test=None, y_test=None):
+        model_ = self.model
+        model = model_(embeddingMatrix)
+        if X_test is not None:
+            model.fit(X_train, y_train, 
+                    validation_data=(X_test, y_test),
+                    epochs=self.n_epochs, batch_size=self.batch_size, verbose = 2)
+        else:
+            model.fit(X_train, y_train, 
+                    epochs=self.n_epochs, batch_size=self.batch_size, verbose = 2)
         return model
 
-    def test():
+    #def test():
         # Add test
 
 
-def getEmbeddingMatrix(wordIndex, gloveDir):
+def getEmbeddingMatrix(wordIndex=None, gloveDir=None, embedding_dim=None):
     """Populate an embedding matrix using a word-index. If the word "happy" has an index 19,
        the 19th row in the embedding matrix should contain the embedding vector for the word "happy".
     Input:
@@ -164,7 +210,7 @@ def getEmbeddingMatrix(wordIndex, gloveDir):
     print('Found %s word vectors.' % len(embeddingsIndex))
     
     # Minimum word index of any word is 1. 
-    embeddingMatrix = np.zeros((len(wordIndex) + 1, EMBEDDING_DIM))
+    embeddingMatrix = np.zeros((len(wordIndex) + 1, embedding_dim))
     for word, i in wordIndex.items():
         embeddingVector = embeddingsIndex.get(word)
         if embeddingVector is not None:

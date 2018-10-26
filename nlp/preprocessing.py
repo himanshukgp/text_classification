@@ -1,6 +1,13 @@
 import numpy as np
+import json, argparse, os
+import re
+import io
+import sys
 
-def preprocessData(trainDataPath, mode="train"):
+label2emotion = {0:"others", 1:"happy", 2: "sad", 3:"angry"}
+emotion2label = {"others":0, "happy":1, "sad":2, "angry":3}
+
+def preprocessData(dataFilePath, mode="train"):
     """Load data from a file, process and return indices, conversations and labels in separate lists
     Input:
         dataFilePath : Path to train/test file to be processed
