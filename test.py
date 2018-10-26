@@ -1,7 +1,7 @@
-from nlp import classify
+from nlp.classify import classifier
 
 def main():
-    a = classify()
+    a = classifier()
     a()
 
 if __name__ == '__main__':
