@@ -35,7 +35,7 @@ class all_models():
                                     self.embedding_dim,
                                     weights=[embeddingMatrix],
                                     input_length=self.max_seq_length,
-                                    trainable=False)
+                                    trainable=True)
         model = Sequential()
         model.add(embeddingLayer)
         model.add(LSTM(self.lstm_dim, dropout=self.dropout))

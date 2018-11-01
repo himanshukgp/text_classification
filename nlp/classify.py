@@ -12,6 +12,9 @@ import re
 import io
 import sys
 
+label2emotion = {0:"others", 1:"happy", 2: "sad", 3:"angry"}
+emotion2label = {"others":0, "happy":1, "sad":2, "angry":3}
+
 
 class classifier():
 
@@ -102,15 +105,15 @@ class classifier():
         label1 = label1[trainIndices]
 
         # Evaluate kfold
-        if self.eval_kfold:
-            self.evaluate_kfold(data=data, labels=labels, label1 = label1, embeddingMatrix=embeddingMatrix)
+        #if self.eval_kfold:
+            #self.evaluate_kfold(data=data, labels=labels, label1 = label1, embeddingMatrix=embeddingMatrix)
 
         # Train on entire data
         model = self.train(X_train=data, y_train=labels,
                            embeddingMatrix=embeddingMatrix)
 
         # Save and load model
-        model.save('EP%d_LR%de-5_LDim%d_BS%d.h5'%(NUM_EPOCHS, int(LEARNING_RATE*(10**5)), LSTM_DIM, BATCH_SIZE))
+        model.save('EP%d_LR%de-5_LDim%d_BS%d.h5'%(self.n_epochs, int(self.lr*(10**5)), self.lstm_dim, self.batch_size))
         # model = load_model('EP%d_LR%de-5_LDim%d_BS%d.h5'%(NUM_EPOCHS, int(LEARNING_RATE*(10**5)), LSTM_DIM, BATCH_SIZE))
 
         # Write predictions to file
@@ -119,9 +122,9 @@ class classifier():
         predictions = model.predict(testData, batch_size=self.batch_size)
         predictions = predictions.argmax(axis=1)
 
-        with io.open(solutionPath, "w", encoding="utf8") as fout:
+        with io.open(self.solutionPath, "w", encoding="utf8") as fout:
             fout.write('\t'.join(["id", "turn1", "turn2", "turn3", "label"]) + '\n')        
-            with io.open(testDataPath, encoding="utf8") as fin:
+            with io.open(self.testDataPath, encoding="utf8") as fin:
                 fin.readline()
                 for lineNum, line in enumerate(fin):
                     fout.write('\t'.join(line.strip().split('\t')[:4]) + '\t')
@@ -158,8 +161,8 @@ class classifier():
                                X_test = X_test, y_test = y_test
                                )
             
-            predictions = model.predict(xVal, batch_size=BATCH_SIZE)
-            accuracy, microPrecision, microRecall, microF1 = getMetrics(predictions, yVal)
+            predictions = model.predict(X_test, batch_size=self.batch_size)
+            accuracy, microPrecision, microRecall, microF1 = getMetrics(predictions, y_test)
             metrics["accuracy"].append(accuracy)
             metrics["microPrecision"].append(microPrecision)
             metrics["microRecall"].append(microRecall)
